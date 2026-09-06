@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+source_file=$1
+if [[ $source_file != *.go ]]; then
+    mv -- "$source_file" "$source_file.go"
+fi
+
+GOCACHE="$PWD/.gocache" go build -o binary ./*.go

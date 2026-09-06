@@ -1,5 +1,9 @@
 FROM buildpack-deps:buster AS isolate
-RUN apt-get update && \
+RUN sed -i \
+        -e 's|deb.debian.org/debian|archive.debian.org/debian|g' \
+        -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+        /etc/apt/sources.list && \
+    apt-get -o Acquire::Check-Valid-Until=false update && \
     apt-get install -y --no-install-recommends git libcap-dev && \
     rm -rf /var/lib/apt/lists/* && \
     git clone https://github.com/envicutor/isolate.git /tmp/isolate/ && \
@@ -13,7 +17,11 @@ FROM node:15.10.0-buster-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN dpkg-reconfigure -p critical dash
-RUN apt-get update && \
+RUN sed -i \
+        -e 's|deb.debian.org/debian|archive.debian.org/debian|g' \
+        -e 's|security.debian.org/debian-security|archive.debian.org/debian-security|g' \
+        /etc/apt/sources.list && \
+    apt-get -o Acquire::Check-Valid-Until=false update && \
     apt-get install -y libxml2 gnupg tar coreutils util-linux libc6-dev \
     binutils build-essential locales libpcre3-dev libevent-dev libgmp3-dev \
     libncurses6 libncurses5 libedit-dev libseccomp-dev rename procps python3 \
@@ -31,6 +39,7 @@ WORKDIR /piston_api
 COPY ["package.json", "package-lock.json", "./"]
 RUN npm install
 COPY ./src ./src
+COPY ./tests ./tests
 
 CMD ["/piston_api/src/docker-entrypoint.sh"]
 EXPOSE 2000/tcp

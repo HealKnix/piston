@@ -6,9 +6,9 @@ exports.describe = 'Uninstalls the named package';
 
 //Splits the package into it's language and version
 function split_package(package) {
-    [language, language_version] = package.split('=');
+    const [language, language_version] = package.split('=');
 
-    res = {
+    const res = {
         language: language,
         version: language_version || '*',
     };
@@ -27,15 +27,20 @@ const msg_format = {
 
 exports.handler = async ({ axios, packages }) => {
     const requests = packages.map(package => split_package(package));
-    for (request of requests) {
+    for (const request of requests) {
         try {
             const uninstall = await axios.delete(`/api/v2/packages`, {
                 data: request,
             });
 
             console.log(msg_format.color(uninstall.data));
-        } catch ({ response }) {
-            console.error(response.data.message);
+        } catch (error) {
+            const message =
+                error.response && error.response.data
+                    ? error.response.data.message
+                    : error.message;
+            console.error(`Uninstallation failed: ${message}`);
+            process.exitCode = 1;
         }
     }
 };

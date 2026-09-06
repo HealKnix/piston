@@ -310,13 +310,14 @@ router.post('/packages', async (req, res) => {
 
         return res.status(200).send(response);
     } catch (e) {
+        const message = e && e.message ? e.message : String(e);
         logger.error(
             `Error while installing package ${pkg.language}-${pkg.version}:`,
-            e.message
+            message
         );
 
         return res.status(500).send({
-            message: e.message,
+            message,
         });
     }
 });
@@ -339,13 +340,14 @@ router.delete('/packages', async (req, res) => {
 
         return res.status(200).send(response);
     } catch (e) {
+        const message = e && e.message ? e.message : String(e);
         logger.error(
             `Error while uninstalling package ${pkg.language}-${pkg.version}:`,
-            e.message
+            message
         );
 
         return res.status(500).send({
-            message: e.message,
+            message,
         });
     }
 });

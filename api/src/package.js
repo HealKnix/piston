@@ -2,7 +2,7 @@ const logger = require('logplease').create('package');
 const semver = require('semver');
 const config = require('./config');
 const globals = require('./globals');
-const fetch = require('node-fetch');
+const { download_file, get_text } = require('./http');
 const path = require('path');
 const fs = require('fs/promises');
 const fss = require('fs');
@@ -56,15 +56,7 @@ class Package {
             `Downloading package from ${this.download} in to ${this.install_path}`
         );
         const pkgpath = path.join(this.install_path, 'pkg.tar.gz');
-        const download = await fetch(this.download);
-
-        const file_stream = fss.create_write_stream(pkgpath);
-        await new Promise((resolve, reject) => {
-            download.body.pipe(file_stream);
-            download.body.on('error', reject);
-
-            file_stream.on('finish', resolve);
-        });
+        await download_file(this.download, pkgpath);
 
         logger.debug('Validating checksums');
         logger.debug(`Assert sha256(pkg.tar.gz) == ${this.checksum}`);
@@ -90,22 +82,69 @@ class Package {
         );
 
         await new Promise((resolve, reject) => {
-            const proc = cp.exec(
-                `bash -c 'cd "${this.install_path}" && tar xzf ${pkgpath}'`
+            let stderr = '';
+            const proc = cp.spawn(
+                'tar',
+                [
+                    '--extract',
+                    '--gzip',
+                    '--file',
+                    pkgpath,
+                    '--touch',
+                    '--no-same-owner',
+                    '--no-same-permissions',
+                    '--no-overwrite-dir',
+                ],
+                { cwd: this.install_path }
             );
 
-            proc.once('exit', (code, _) => {
-                code === 0 ? resolve() : reject();
+            proc.once('close', code => {
+                if (code === 0) {
+                    resolve();
+                    return;
+                }
+
+                const errors = stderr
+                    .trim()
+                    .split('\n')
+                    .filter(line => line.length > 0);
+                const metadata_errors = errors.filter(
+                    line =>
+                        /^tar: .*: Cannot change mode to .*: Operation not permitted$/.test(
+                            line
+                        ) ||
+                        line ===
+                            'tar: Exiting with failure status due to previous errors'
+                );
+
+                if (
+                    errors.length > 1 &&
+                    metadata_errors.length === errors.length
+                ) {
+                    logger.warn(
+                        'Package filesystem does not support Unix modes; continuing with existing permissions'
+                    );
+                    resolve();
+                    return;
+                }
+
+                reject(
+                    new Error(
+                        `tar exited with code ${code}: ${
+                            stderr.trim() || 'unknown error'
+                        }`
+                    )
+                );
             });
 
             proc.stdout.pipe(process.stdout);
-            proc.stderr.pipe(process.stderr);
+            proc.stderr.on('data', data => {
+                stderr += data;
+                process.stderr.write(data);
+            });
 
             proc.once('error', reject);
         });
-
-        logger.debug('Registering runtime');
-        runtime.load_package(this.install_path);
 
         logger.debug('Caching environment');
         const get_env_command = `cd ${this.install_path}; source environment; env`;
@@ -122,7 +161,13 @@ class Package {
             );
 
             proc.once('exit', (code, _) => {
-                code === 0 ? resolve(stdout) : reject();
+                code === 0
+                    ? resolve(stdout)
+                    : reject(
+                          new Error(
+                              `Failed to load package environment: process exited with code ${code}`
+                          )
+                      );
             });
 
             proc.stdout.on('data', data => {
@@ -145,17 +190,36 @@ class Package {
         await fs.write_file(path.join(this.install_path, '.env'), filtered_env);
 
         logger.debug('Changing Ownership of package directory');
-        await util.promisify(chownr)(
-            this.install_path,
-            process.getuid(),
-            process.getgid()
-        );
+        try {
+            await util.promisify(chownr)(
+                this.install_path,
+                process.getuid(),
+                process.getgid()
+            );
+        } catch (error) {
+            if (['EACCES', 'EPERM', 'EROFS'].includes(error.code)) {
+                logger.warn(
+                    'Package filesystem does not support Unix ownership; continuing with existing ownership'
+                );
+            } else {
+                throw error;
+            }
+        }
 
         logger.debug('Writing installed state to disk');
-        await fs.write_file(
-            path.join(this.install_path, globals.pkg_installed_file),
-            Date.now().toString()
+        const installed_file = path.join(
+            this.install_path,
+            globals.pkg_installed_file
         );
+        await fs.write_file(installed_file, Date.now().toString());
+
+        logger.debug('Registering runtime');
+        try {
+            runtime.load_package(this.install_path);
+        } catch (error) {
+            await fs.rm(installed_file, { force: true });
+            throw error;
+        }
 
         logger.info(`Installed ${this.language}-${this.version.raw}`);
 
@@ -198,7 +262,7 @@ class Package {
     }
 
     static async get_package_list() {
-        const repo_content = await fetch(config.repo_url).then(x => x.text());
+        const repo_content = await get_text(config.repo_url);
 
         const entries = repo_content.split('\n').filter(x => x.length > 0);
 

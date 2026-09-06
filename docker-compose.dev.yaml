@@ -1,3 +1,5 @@
+x-piston-run-budget-ms: &piston-run-budget-ms '10000'
+x-piston-compile-budget-ms: &piston-compile-budget-ms '60000'
 version: '3.2'
 
 services:
@@ -11,7 +13,11 @@ services:
         volumes:
             - ./data/piston/packages:/piston/packages
         environment:
-            - PISTON_REPO_URL=http://repo:8000/index
+            PISTON_COMPILE_TIMEOUT: *piston-compile-budget-ms
+            PISTON_COMPILE_CPU_TIME: *piston-compile-budget-ms
+            PISTON_RUN_TIMEOUT: *piston-run-budget-ms
+            PISTON_RUN_CPU_TIME: *piston-run-budget-ms
+            PISTON_REPO_URL: http://repo:8000/index
 
     repo: # Local testing of packages
         build: repo
